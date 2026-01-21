@@ -8,8 +8,8 @@ substitutions:
   friendly_name: IRK Capture
   api_key: "ZmFrZWFwaWtleWZha2VleGFtcGxlZmFrZWtleQ=="
   ota_password: "ChangeMe!2025"
-  esp32_variant: esp32          # Any ESP32 variant (esp32, esp32c3, esp32c6, esp32s3, etc.)
-  esp32_board: featheresp32     # Set to your board ID (e.g., featheresp32, esp32dev)
+  esp32_variant: esp32 # Any ESP32 variant (esp32, esp32c3, esp32c6, esp32s3, etc.)
+  esp32_board: featheresp32 # Set to your board ID (e.g., featheresp32, esp32dev)
   ble_name: "IRK Capture"
 
 wifi:
@@ -51,6 +51,8 @@ esp32:
       CONFIG_BT_NIMBLE_SECURITY_ENABLE: "y"
       CONFIG_BT_NIMBLE_SM_LEGACY: "y"
       CONFIG_BT_NIMBLE_SM_SC: "y"
+    advanced:
+      enable_ota_rollback: true
 
 esphome:
   name: ${device_name}
