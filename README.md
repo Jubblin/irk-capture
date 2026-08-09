@@ -72,6 +72,14 @@ Again, my blog post covers usage in detail. However, the super short version is 
 - Watch the Sensors IRK value and it should display the captured IRK
 - Paste the captured IRK into the Private BLE Device integration in Home Assistant
 
+## Optional: Auto-Add Captured IRKs to Private BLE Device
+
+By default you copy the captured IRK into the Private BLE Device integration
+by hand. If you'd rather have it added automatically as soon as it's
+captured, there's an optional Home Assistant blueprint + `rest_command`
+setup for that — see
+[docs/private-ble-auto-add.md](docs/private-ble-auto-add.md).
+
 ## Home Assistant Entities
 
 After flashing and connecting to Home Assistant, the following entities will be available:

@@ -1,0 +1,137 @@
+blueprint:
+  name: IRK Capture — Auto-Add Private BLE Device
+  description: >
+    Watches an IRK Capture "IRK" sensor for a newly captured key and
+    automatically creates a Home Assistant "Private BLE Device" config entry
+    for it. Retries submission until Home Assistant's own Bluetooth scanner
+    (not the IRK Capture ESP32 itself) has resolved a live advertisement for
+    the device, since that is required by the private_ble_device
+    integration's own setup validation.
+
+    Requires two rest_command entries defined in configuration.yaml first,
+    plus a Home Assistant Long-Lived Access Token — see
+    docs/private-ble-auto-add.md in the irk-capture repo for the exact
+    snippet and setup steps.
+  domain: automation
+  source_url: https://github.com/DerekSeaman/irk-capture/blob/main/blueprints/automation/DerekSeaman/irk_auto_add_private_ble.yaml
+  input:
+    irk_sensor:
+      name: IRK Sensor
+      description: The IRK Capture "IRK" sensor entity to watch for new keys.
+      selector:
+        entity:
+          domain: sensor
+    max_attempts:
+      name: Max Retry Attempts
+      description: >
+        How many times to resubmit the IRK while waiting for Home
+        Assistant's Bluetooth scanner to see the device broadcasting.
+      default: 12
+      selector:
+        number:
+          min: 1
+          max: 60
+          mode: box
+    retry_delay:
+      name: Retry Delay (seconds)
+      description: Seconds to wait between retry attempts.
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 300
+          unit_of_measurement: seconds
+          mode: box
+
+variables:
+  max_attempts: !input max_attempts
+  retry_delay: !input retry_delay
+
+trigger:
+  - platform: state
+    entity_id: !input irk_sensor
+
+condition:
+  - condition: template
+    value_template: >
+      {{ (trigger.to_state.state | default('', true)) | regex_match('^[0-9a-fA-F]{32}$') }}
+
+action:
+  - variables:
+      captured_irk: "{{ trigger.to_state.state | lower }}"
+
+  - service: rest_command.irk_capture_start_ble_flow
+    response_variable: start_result
+
+  - variables:
+      flow_id: "{{ start_result.content.flow_id | default('') }}"
+      start_type: "{{ start_result.content.type | default('') }}"
+      start_reason: "{{ start_result.content.reason | default('') }}"
+
+  - if:
+      - "{{ start_type == 'abort' }}"
+    then:
+      - service: persistent_notification.create
+        data:
+          title: "IRK Auto-Add: could not start"
+          message: >
+            {{ 'Already added.' if start_reason == 'already_configured'
+               else 'Home Assistant could not start the Private BLE Device
+               setup flow (' ~ start_reason ~ ').' }}
+            IRK: {{ captured_irk }}
+      - stop: "Flow aborted before submission"
+
+  - repeat:
+      until:
+        - >-
+          {{ (submit_type is defined and (submit_type in ['create_entry', 'abort']
+             or submit_error == 'irk_not_valid')) or repeat.index >= max_attempts }}
+      sequence:
+        - service: rest_command.irk_capture_submit_irk
+          data:
+            flow_id: "{{ flow_id }}"
+            irk: "{{ captured_irk }}"
+          response_variable: submit_result
+        - variables:
+            submit_type: "{{ submit_result.content.type | default('') }}"
+            submit_error: "{{ submit_result.content.errors.base | default('') }}"
+            submit_reason: "{{ submit_result.content.reason | default('') }}"
+        - if:
+            - "{{ not (submit_type in ['create_entry', 'abort'] or submit_error == 'irk_not_valid') }}"
+          then:
+            - delay:
+                seconds: "{{ retry_delay }}"
+
+  - choose:
+      - conditions: "{{ submit_type == 'create_entry' }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "IRK Auto-Add: success"
+              message: "Added Private BLE Device for {{ captured_irk }}."
+      - conditions: "{{ submit_type == 'abort' and submit_reason == 'already_configured' }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "IRK Auto-Add: already exists"
+              message: "A Private BLE Device already exists for {{ captured_irk }}."
+      - conditions: "{{ submit_error == 'irk_not_valid' }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "IRK Auto-Add: invalid IRK"
+              message: "Home Assistant rejected the IRK as malformed: {{ captured_irk }}."
+    default:
+      - service: persistent_notification.create
+        data:
+          title: "IRK Auto-Add: gave up"
+          message: >
+            Could not confirm a Private BLE Device for {{ captured_irk }}
+            after {{ max_attempts }} attempts (last error:
+            {{ submit_error or submit_reason or 'unknown' }}). Make sure the
+            paired device is nearby, awake, and broadcasting BLE, then
+            either wait for it to re-advertise or add it manually via
+            Settings > Devices & services.
+
+mode: queued
+max_exceeds: 5
